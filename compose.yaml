@@ -1,0 +1,21 @@
+name: post-server
+
+services:
+  post-server:
+    build: .
+    image: post-server:local
+    ports:
+      - "80:8080"
+    volumes:
+      - request-logs:/app/logs
+    restart: unless-stopped
+    stop_grace_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  request-logs:
+    name: post-server-logs

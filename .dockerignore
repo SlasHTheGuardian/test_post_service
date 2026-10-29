@@ -1,0 +1,5 @@
+# Only application files are needed in the build context.
+*
+!Dockerfile
+!package.json
+!server.js
