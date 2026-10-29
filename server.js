@@ -116,7 +116,7 @@ export function createPostServer({
 
 function start() {
   const host = process.env.HOST ?? '0.0.0.0';
-  const port = Number(process.env.PORT ?? 80);
+  const port = Number(process.env.PORT ?? 335);
   const maxBodyBytes = Number(process.env.MAX_BODY_BYTES ?? 1024 * 1024);
   const logFile = process.env.LOG_FILE ? resolve(process.env.LOG_FILE) : defaultLogFile;
 
@@ -139,7 +139,7 @@ function start() {
   server.listen(port, host, () => {
     console.log(`POST server listening on ${host}:${port}`);
     console.log(`Request log: ${logFile}`);
-    console.log('Send POST to http://<server-ip>/ (any path). Stop: Ctrl+C.');
+    console.log(`Send POST to http://<server-ip>:${port}/ (any path). Stop: Ctrl+C.`);
   });
 
   const stop = () => {
