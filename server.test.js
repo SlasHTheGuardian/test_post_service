@@ -85,7 +85,7 @@ test('GET persists decoded query parameters, repeated keys and metadata before 2
 
 test('GET accepts any path and saves repeated requests as separate records', async (t) => {
   const { url, logFile } = await setup(t);
-  const paths = ['/', '/custom?x=1', '/custom?x=1'];
+  const paths = ['/', '/save', '/custom?x=1', '/custom?x=1', '/?message=root'];
   for (const path of paths) {
     assert.equal((await fetch(`${url}${path}`)).status, 200);
   }
@@ -94,6 +94,34 @@ test('GET accepts any path and saves repeated requests as separate records', asy
   assert.ok(saved.every((record) => record.method === 'GET'));
   assert.deepEqual(saved[0].query, {});
   assert.equal(new Set(saved.map((record) => record.id)).size, paths.length);
+});
+
+test('former frontend routes now accept GET data and return JSON only', async (t) => {
+  const { url, logFile } = await setup(t);
+  const paths = ['/', '/ui', '/ui/', '/ui/styles.css', '/ui/app.js'];
+  for (const path of paths) {
+    const response = await fetch(`${url}${path}`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^application\/json/);
+    assert.equal((await response.json()).status, 'ok');
+  }
+  assert.deepEqual((await records(logFile)).map((record) => record.url), paths);
+});
+
+test('client IP headers are trusted only in proxy mode and must contain a valid IP', async (t) => {
+  for (const { trustProxy, header, expected } of [
+    { trustProxy: false, header: '203.0.113.10', expected: '127.0.0.1' },
+    { trustProxy: true, header: '203.0.113.10', expected: '203.0.113.10' },
+    { trustProxy: true, header: '2001:db8::1', expected: '2001:db8::1' },
+    { trustProxy: true, header: 'not-an-ip', expected: '127.0.0.1' },
+  ]) {
+    const { url, logFile } = await setup(t, { trustProxy });
+    const response = await fetch(`${url}/save?proxy=test`, { headers: { 'X-Real-IP': header } });
+    assert.equal(response.status, 200);
+    const [record] = await records(logFile);
+    assert.equal(record.clientIp, expected);
+    assert.equal(record.peerIp, '127.0.0.1');
+  }
 });
 
 test('empty and binary bodies are preserved', async (t) => {
@@ -140,7 +168,7 @@ test('health checks and unsupported methods do not create log records', async (t
     assert.deepEqual(await health.json(), { status: 'ok' });
   }
   for (const method of ['PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD']) {
-    const response = await fetch(url, { method });
+    const response = await fetch(`${url}/save`, { method });
     assert.equal(response.status, 405);
     assert.equal(response.headers.get('allow'), 'GET, POST');
   }

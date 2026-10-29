@@ -1,0 +1,18 @@
+{
+	default_sni 82.202.139.43
+	servers {
+		protocols h1 h2
+	}
+}
+
+https://82.202.139.43 {
+	tls {
+		issuer acme https://acme-v02.api.letsencrypt.org/directory {
+			profile shortlived
+		}
+	}
+
+	reverse_proxy post-server:8080 {
+		header_up X-Real-IP {remote_host}
+	}
+}

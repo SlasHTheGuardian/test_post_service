@@ -2,7 +2,7 @@
   "name": "post-server",
   "version": "1.0.0",
   "private": true,
-  "description": "HTTP server for receiving and logging POST and GET requests on port 335",
+  "description": "GET/POST request logging service with public HTTPS via Caddy",
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {

@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { isIP } from 'node:net';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -23,6 +24,7 @@ export function createPostServer({
   logFile = defaultLogFile,
   maxBodyBytes = 1024 * 1024,
   logger = console,
+  trustProxy = false,
 } = {}) {
   let pendingWrite = Promise.resolve();
 
@@ -90,10 +92,16 @@ export function createPostServer({
       for (const name of ['authorization', 'proxy-authorization', 'cookie']) {
         if (name in headers) headers[name] = '[REDACTED]';
       }
+      // In Compose, only Caddy can reach this service. Caddy overwrites this
+      // header with the actual peer IP; direct runs ignore it by default.
+      const forwardedIp = request.headers['x-real-ip'];
+      const clientIp = trustProxy && typeof forwardedIp === 'string' && isIP(forwardedIp)
+        ? forwardedIp : request.socket.remoteAddress;
       const record = {
         id: randomUUID(),
         receivedAt: new Date().toISOString(),
-        clientIp: request.socket.remoteAddress,
+        clientIp,
+        peerIp: request.socket.remoteAddress,
         method: request.method,
         url: request.url,
         query,
@@ -134,7 +142,7 @@ export function createPostServer({
 
 function start() {
   const host = process.env.HOST ?? '0.0.0.0';
-  const port = Number(process.env.PORT ?? 335);
+  const port = Number(process.env.PORT ?? 80);
   const maxBodyBytes = Number(process.env.MAX_BODY_BYTES ?? 1024 * 1024);
   const logFile = process.env.LOG_FILE ? resolve(process.env.LOG_FILE) : defaultLogFile;
 
@@ -149,7 +157,7 @@ function start() {
     return;
   }
 
-  const server = createPostServer({ logFile, maxBodyBytes });
+  const server = createPostServer({ logFile, maxBodyBytes, trustProxy: process.env.TRUST_PROXY === 'true' });
   server.on('error', (error) => {
     console.error(`Cannot listen on ${host}:${port}: ${error.message}`);
     process.exitCode = 1;
@@ -157,7 +165,7 @@ function start() {
   server.listen(port, host, () => {
     console.log(`POST/GET server listening on ${host}:${port}`);
     console.log(`Request log: ${logFile}`);
-    console.log(`Send GET or POST to http://<server-ip>:${port}/ (GET /health checks status). Stop: Ctrl+C.`);
+    console.log(`Internal HTTP listener: http://${host}:${port}/. Public HTTPS is provided by Caddy.`);
   });
 
   const stop = () => {
