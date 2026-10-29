@@ -1,6 +1,6 @@
-# POST server
+# POST / GET server
 
-Сервер принимает HTTP POST-запросы по IPv4-адресу компьютера на порту **335**.
+Сервер принимает HTTP POST- и GET-запросы по IPv4-адресу компьютера на порту **335**.
 По умолчанию слушает `0.0.0.0`, то есть все сетевые интерфейсы.
 Подходит для проверки интеграций и приёма тестовых запросов.
 
@@ -19,10 +19,10 @@ docker compose up -d --build
 Устанавливать Node.js на компьютере для этого способа запуска не нужно.
 При первой сборке нужен доступ к реестру образов для загрузки `node:24-alpine`.
 
-Проверка запроса, состояния контейнера и просмотр логов:
+Проверка запроса, состояния контейнера и просмотр логов из Windows cmd:
 
-```powershell
-Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:335/' -ContentType 'application/json' -Body '{"message":"hello from Docker"}'
+```cmd
+curl.exe -X POST "http://127.0.0.1:335/" -H "Content-Type: application/json" -d "{\"message\":\"hello from Docker\"}"
 docker compose ps
 docker compose logs -f
 ```
@@ -84,17 +84,17 @@ node server.js
 
 ## Отправка запросов
 
-Пример из PowerShell на том же компьютере:
+POST с JSON из Windows cmd на том же компьютере:
 
-```powershell
-Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:335/' -ContentType 'application/json' -Body '{"message":"hello"}'
+```cmd
+curl.exe -X POST "http://127.0.0.1:335/" -H "Content-Type: application/json" -d "{\"message\":\"hello\"}"
 ```
 
 С другого компьютера замените `127.0.0.1` на IPv4-адрес машины с сервером
 (посмотреть его можно командой `ipconfig`). Например:
 
-```powershell
-Invoke-RestMethod -Method Post -Uri 'http://192.168.1.10:335/webhook' -ContentType 'text/plain' -Body 'test'
+```cmd
+curl.exe -X POST "http://192.168.1.10:335/webhook" -H "Content-Type: text/plain" -d "test"
 ```
 
 Поддерживается **любой путь**, включая `/`, `/post`, `/webhook` и параметры запроса.
@@ -102,23 +102,65 @@ Invoke-RestMethod -Method Post -Uri 'http://192.168.1.10:335/webhook' -ContentTy
 Сервер сохраняет тело без разбора и проверки JSON. Поддерживается chunked-передача.
 По умолчанию максимальный размер тела — 1 МиБ; при превышении возвращается HTTP 413.
 
+Для сохранения данных через GET передавайте параметры в URL:
+
+```cmd
+curl.exe "http://127.0.0.1:335/save?message=hello&id=123"
+```
+
+Поддерживается любой путь, кроме служебного `GET /health`. Исходный URL сохраняется
+в поле `url`, разобранные параметры — в поле `query` той же записи журнала:
+
+```json
+{"message":"hello","id":"123"}
+```
+
+Значения параметров сохраняются как строки, повторяющиеся параметры — как массивы:
+`?tag=one&tag=two` даёт `{"tag":["one","two"]}`. URL-кодирование декодируется,
+пустые значения сохраняются как `""`. Для пробелов и специальных символов используйте
+автоматическое кодирование curl:
+
+```cmd
+curl.exe --get "http://127.0.0.1:335/save" --data-urlencode "message=hello world" --data-urlencode "id=123"
+```
+
+Каждый полученный GET создаёт отдельную запись, даже при одинаковом URL.
+В ответе устанавливается `Cache-Control: no-store`. В обычном GET тело отсутствует,
+поэтому `body` будет `""`, а `receivedBytes` — `0`: параметры находятся в `query`.
+
 После записи запроса в журнал сервер возвращает HTTP 200:
 
 ```json
 {"status":"ok","requestId":"уникальный UUID","receivedBytes":19}
 ```
 
-При ошибке записи возвращается HTTP 500. `GET /health` возвращает
-`{"status":"ok"}` и проверяет работу HTTP-сервера. Остальные методы — HTTP 405.
+При ошибке записи возвращается HTTP 500. `GET /health`, в том числе с параметрами
+URL, возвращает `{"status":"ok"}` и проверяет работу HTTP-сервера без записи в журнал.
+Методы, кроме GET и POST, возвращают HTTP 405.
+
+После обновления исходников пересоберите и пересоздайте контейнер из папки проекта:
+
+```cmd
+docker compose up -d --build
+```
+
+Журнал в существующем volume при этом сохраняется.
 
 ## Журнал
 
 Запросы выводятся в консоль и сохраняются в `logs/requests.jsonl` рядом с `server.js`.
-Одна строка — один JSON-объект: ID, время UTC, IP клиента, путь, заголовки и тело.
+Одна строка — один JSON-объект: ID, время UTC, IP клиента, метод, путь,
+параметры URL (`query`), заголовки и тело. Поле `query` записывается и для GET, и для POST.
 Тело UTF-8 записывается строкой с `bodyEncoding: "utf8"`, остальные байты —
 в Base64 с `bodyEncoding: "base64"`. Заголовки `Authorization`,
 `Proxy-Authorization` и `Cookie` скрываются. Тело сохраняется полностью в пределах лимита.
 Журнал дополняется при перезапуске; автоматической ротации нет.
+
+Посмотреть последнюю запись в контейнере из Windows cmd:
+
+```cmd
+docker compose exec post-server tail -n 1 /app/logs/requests.jsonl
+```
 
 ## Доступ по сети
 

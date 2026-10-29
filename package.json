@@ -2,7 +2,7 @@
   "name": "post-server",
   "version": "1.0.0",
   "private": true,
-  "description": "HTTP server for receiving and logging POST requests on port 335",
+  "description": "HTTP server for receiving and logging POST and GET requests on port 335",
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {

@@ -13,6 +13,7 @@ function sendJson(response, status, payload, headers = {}) {
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(body),
+    'Cache-Control': 'no-store',
     ...headers,
   });
   response.end(body);
@@ -26,18 +27,34 @@ export function createPostServer({
   let pendingWrite = Promise.resolve();
 
   const server = http.createServer((request, response) => {
-    if (request.method === 'GET' && request.url === '/health') {
+    let requestUrl;
+    try {
+      requestUrl = new URL(request.url, 'http://localhost');
+    } catch {
+      request.resume();
+      sendJson(response, 400, { error: 'Invalid request URL.' });
+      return;
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/health') {
       request.resume();
       sendJson(response, 200, { status: 'ok' });
       return;
     }
 
-    if (request.method !== 'POST') {
+    if (request.method !== 'POST' && request.method !== 'GET') {
       request.resume();
-      sendJson(response, 405, { error: 'Use POST to send data, or GET /health.' }, {
-        Allow: request.url === '/health' ? 'GET, POST' : 'POST',
+      sendJson(response, 405, { error: 'Use GET or POST to send data.' }, {
+        Allow: 'GET, POST',
       });
       return;
+    }
+
+    const query = Object.create(null);
+    for (const [name, value] of requestUrl.searchParams) {
+      if (!Object.hasOwn(query, name)) query[name] = value;
+      else if (Array.isArray(query[name])) query[name].push(value);
+      else query[name] = [query[name], value];
     }
 
     let chunks = [];
@@ -79,6 +96,7 @@ export function createPostServer({
         clientIp: request.socket.remoteAddress,
         method: request.method,
         url: request.url,
+        query,
         headers,
         receivedBytes: body.length,
         bodyEncoding: isUtf8 ? 'utf8' : 'base64',
@@ -137,9 +155,9 @@ function start() {
     process.exitCode = 1;
   });
   server.listen(port, host, () => {
-    console.log(`POST server listening on ${host}:${port}`);
+    console.log(`POST/GET server listening on ${host}:${port}`);
     console.log(`Request log: ${logFile}`);
-    console.log(`Send POST to http://<server-ip>:${port}/ (any path). Stop: Ctrl+C.`);
+    console.log(`Send GET or POST to http://<server-ip>:${port}/ (GET /health checks status). Stop: Ctrl+C.`);
   });
 
   const stop = () => {

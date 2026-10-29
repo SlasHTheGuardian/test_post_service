@@ -46,9 +46,54 @@ test('POST accepts any path and persists UTF-8, metadata and redacted headers be
   assert.equal(record.body, body);
   assert.equal(record.bodyEncoding, 'utf8');
   assert.equal(record.url, '/webhook?source=test');
+  assert.deepEqual(record.query, { source: 'test' });
   assert.equal(record.clientIp, '127.0.0.1');
   assert.equal(record.headers.authorization, '[REDACTED]');
   assert.equal(record.headers.cookie, '[REDACTED]');
+});
+
+test('GET persists decoded query parameters, repeated keys and metadata before 200', async (t) => {
+  const { url, logFile } = await setup(t);
+  const target = '/save?message=hello+world&id=123&tag=one&tag=two&empty=&flag'
+    + '&text=%D0%9F%D1%80%D0%B8%D0%B2%D0%B5%D1%82&escaped=a%26b%3Dc'
+    + '&__proto__=value&constructor=test';
+  const response = await fetch(`${url}${target}`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const result = await response.json();
+  const [record] = await records(logFile);
+  assert.equal(result.status, 'ok');
+  assert.equal(result.requestId, record.id);
+  assert.equal(result.receivedBytes, 0);
+  assert.equal(record.method, 'GET');
+  assert.equal(record.url, target);
+  assert.equal(record.clientIp, '127.0.0.1');
+  assert.equal(record.body, '');
+  assert.equal(record.bodyEncoding, 'utf8');
+  assert.deepEqual(record.query, {
+    message: 'hello world',
+    id: '123',
+    tag: ['one', 'two'],
+    empty: '',
+    flag: '',
+    text: 'Привет',
+    escaped: 'a&b=c',
+    ['__proto__']: 'value',
+    constructor: 'test',
+  });
+});
+
+test('GET accepts any path and saves repeated requests as separate records', async (t) => {
+  const { url, logFile } = await setup(t);
+  const paths = ['/', '/custom?x=1', '/custom?x=1'];
+  for (const path of paths) {
+    assert.equal((await fetch(`${url}${path}`)).status, 200);
+  }
+  const saved = await records(logFile);
+  assert.deepEqual(saved.map((record) => record.url), paths);
+  assert.ok(saved.every((record) => record.method === 'GET'));
+  assert.deepEqual(saved[0].query, {});
+  assert.equal(new Set(saved.map((record) => record.id)).size, paths.length);
 });
 
 test('empty and binary bodies are preserved', async (t) => {
@@ -87,16 +132,19 @@ test('body limit accepts boundary and rejects larger bodies without logging them
   assert.equal((await records(logFile)).length, 1);
 });
 
-test('health and unsupported methods return appropriate status codes', async (t) => {
-  const { url } = await setup(t);
-  const health = await fetch(`${url}/health`);
-  assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: 'ok' });
-  for (const method of ['GET', 'PUT', 'DELETE']) {
+test('health checks and unsupported methods do not create log records', async (t) => {
+  const { url, logFile } = await setup(t);
+  for (const path of ['/health', '/health?probe=1']) {
+    const health = await fetch(`${url}${path}`);
+    assert.equal(health.status, 200);
+    assert.deepEqual(await health.json(), { status: 'ok' });
+  }
+  for (const method of ['PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD']) {
     const response = await fetch(url, { method });
     assert.equal(response.status, 405);
-    assert.equal(response.headers.get('allow'), 'POST');
+    assert.equal(response.headers.get('allow'), 'GET, POST');
   }
+  await assert.rejects(readFile(logFile), { code: 'ENOENT' });
 });
 
 test('concurrent POSTs produce separate complete log records', async (t) => {
@@ -114,7 +162,16 @@ test('failed persistence returns 500 and later requests can recover', async (t) 
   const blockedDirectory = join(directory, 'logs');
   await writeFile(blockedDirectory, 'blocks directory creation');
   assert.equal((await fetch(url, { method: 'POST', body: 'first' })).status, 500);
+  const failedGet = await fetch(`${url}/save?message=first`);
+  assert.equal(failedGet.status, 500);
+  assert.equal(failedGet.headers.get('cache-control'), 'no-store');
   await rm(blockedDirectory);
+  assert.equal((await fetch(`${url}/save?message=second`)).status, 200);
   assert.equal((await fetch(url, { method: 'POST', body: 'second' })).status, 200);
-  assert.equal((await records(logFile))[0].body, 'second');
+  const saved = await records(logFile);
+  assert.equal(saved.length, 2);
+  assert.equal(saved[0].method, 'GET');
+  assert.deepEqual(saved[0].query, { message: 'second' });
+  assert.equal(saved[1].method, 'POST');
+  assert.equal(saved[1].body, 'second');
 });
