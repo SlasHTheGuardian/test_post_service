@@ -2,4 +2,6 @@ logs/
 node_modules/
 *.log
 requests.jsonl
+get.jsonl
+post.jsonl
 post-server.tar

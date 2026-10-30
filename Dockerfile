@@ -5,7 +5,7 @@ WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8080 \
-    LOG_FILE=/app/logs/requests.jsonl
+    LOG_DIR=/app/logs
 
 RUN mkdir -p /app/logs && chown node:node /app/logs
 COPY --chown=node:node package.json server.js ./
